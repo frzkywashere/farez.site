@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tetris - by Farez</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a0f;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:monospace;padding:16px}
+.title{font-size:22px;font-weight:500;color:#7c86ff;margin-bottom:2px;letter-spacing:.1em}
+.credit{font-size:12px;color:#334155;margin-bottom:16px;letter-spacing:.06em}
+.credit span{color:#7c86ff}
+.game-area{display:flex;gap:16px;align-items:flex-start}
+canvas{border:0.5px solid #2d2f50;background:#0d0d1a;display:block}
+.side{width:110px;display:flex;flex-direction:column;gap:10px}
+.panel{background:#13131f;border:0.5px solid #1e2030;border-radius:8px;padding:12px}
+.panel-label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.panel-val{font-size:18px;font-weight:500;color:#7c86ff}
+.ctrl-btn{width:100%;padding:7px;background:#13131f;border:0.5px solid #2d2f50;border-radius:7px;color:#94a3b8;font-size:12px;cursor:pointer}
+.ctrl-btn:hover{border-color:#7c86ff;color:#7c86ff}
+.dpad{display:grid;grid-template-columns:repeat(3,44px);grid-template-rows:repeat(3,44px);gap:4px;margin-top:8px}
+.dpad-btn{background:#13131f;border:0.5px solid #2d2f50;border-radius:8px;color:#94a3b8;font-size:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none}
+.dpad-btn:active{background:#1e2030;color:#7c86ff}
+.dpad-empty{background:transparent;border:none}
+.over-overlay{display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(10,10,15,0.88);align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.over-overlay.show{display:flex}
+.over-title{font-size:16px;color:#7c86ff;font-weight:500}
+.over-score{font-size:12px;color:#64748b}
+.canvas-wrap{position:relative}
+</style>
+</head>
+<body>
+<div class="title">TETRIS</div>
+<div class="credit">created by <span>farez</span></div>
+<div class="game-area">
+  <div class="canvas-wrap">
+    <canvas id="board" width="200" height="400"></canvas>
+    <div class="over-overlay" id="overlay">
+      <div class="over-title">Game Over</div>
+      <div class="over-score" id="final-score"></div>
+      <button class="ctrl-btn" onclick="startGame()">Main lagi</button>
+    </div>
+  </div>
+  <div class="side">
+    <div class="panel">
+      <div class="panel-label">Score</div>
+      <div class="panel-val" id="score">0</div>
+    </div>
+    <div class="panel">
+      <div class="panel-label">Level</div>
+      <div class="panel-val" id="level">1</div>
+    </div>
+    <div class="panel">
+      <div class="panel-label">Next</div>
+      <canvas id="next" width="80" height="70" style="margin-top:4px"></canvas>
+    </div>
+    <button class="ctrl-btn" id="pauseBtn" onclick="togglePause()">Pause</button>
+    <button class="ctrl-btn" onclick="startGame()">Restart</button>
+    <div class="dpad">
+      <div class="dpad-empty"></div>
+      <div class="dpad-btn" onclick="doRotate()">↑</div>
+      <div class="dpad-empty"></div>
+      <div class="dpad-btn" onclick="doLeft()">←</div>
+      <div class="dpad-btn" onclick="doDown()">↓</div>
+      <div class="dpad-btn" onclick="doRight()">→</div>
+      <div class="dpad-empty"></div>
+      <div class="dpad-btn" style="font-size:11px" onclick="doDrop()">DROP</div>
+      <div class="dpad-empty"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const COLS=10,ROWS=20,SZ=20;
+const COLORS=['#7c86ff','#4ec9b0','#f89820','#e34c26','#4ade80','#f472b6','#60a5fa'];
+const SHAPES=[[[1,1,1,1]],[[1,1],[1,1]],[[0,1,0],[1,1,1]],[[1,0,0],[1,1,1]],[[0,0,1],[1,1,1]],[[0,1,1],[1,1,0]],[[1,1,0],[0,1,1]]];
+const canvas=document.getElementById('board');
+const ctx=canvas.getContext('2d');
+const nc=document.getElementById('next');
+const nctx=nc.getContext('2d');
+let board,piece,nextP,score,level,lines,paused,gameOver,interval;
+function newBoard(){return Array.from({length:ROWS},()=>Array(COLS).fill(0))}
+function randPiece(){const i=Math.floor(Math.random()*SHAPES.length);const shape=SHAPES[i].map(r=>[...r]);return{shape,color:COLORS[i],x:Math.floor(COLS/2)-Math.floor(shape[0].length/2),y:0}}
+function drawCell(c,x,y,color,sz){c.fillStyle=color;c.fillRect(x*sz+1,y*sz+1,sz-2,sz-2)}
+function draw(){
+  ctx.fillStyle='#0d0d1a';ctx.fillRect(0,0,200,400);
+  ctx.strokeStyle='#1a1a2e';ctx.lineWidth=0.5;
+  for(let r=0;r<ROWS;r++){ctx.beginPath();ctx.moveTo(0,r*SZ);ctx.lineTo(200,r*SZ);ctx.stroke()}
+  for(let c=0;c<COLS;c++){ctx.beginPath();ctx.moveTo(c*SZ,0);ctx.lineTo(c*SZ,400);ctx.stroke()}
+  board.forEach((row,r)=>row.forEach((v,c)=>{if(v)drawCell(ctx,c,r,v,SZ)}));
+  if(piece){
+    let gy=piece.y;
+    while(!collides(piece.shape,piece.x,gy+1))gy++;
+    if(gy!==piece.y){ctx.globalAlpha=0.2;piece.shape.forEach((row,r)=>row.forEach((v,c)=>{if(v)drawCell(ctx,piece.x+c,gy+r,piece.color,SZ)}));ctx.globalAlpha=1}
+    piece.shape.forEach((row,r)=>row.forEach((v,c)=>{if(v)drawCell(ctx,piece.x+c,piece.y+r,piece.color,SZ)}));
+  }
+}
+function drawNext(){
+  nctx.fillStyle='#13131f';nctx.fillRect(0,0,80,70);
+  if(!nextP)return;
+  const ox=Math.floor((4-nextP.shape[0].length)/2),oy=Math.floor((4-nextP.shape.length)/2);
+  nextP.shape.forEach((row,r)=>row.forEach((v,c)=>{if(v)drawCell(nctx,ox+c,oy+r,nextP.color,16)}));
+}
+function collides(shape,ox,oy){return shape.some((row,r)=>row.some((v,c)=>{if(!v)return false;const nx=ox+c,ny=oy+r;return nx<0||nx>=COLS||ny>=ROWS||(ny>=0&&board[ny][nx])}))}
+function rotate(shape){return shape[0].map((_,i)=>shape.map(r=>r[i]).reverse())}
+function merge(){piece.shape.forEach((row,r)=>row.forEach((v,c)=>{if(v)board[piece.y+r][piece.x+c]=piece.color}))}
+function clearLines(){
+  let cleared=0;
+  for(let r=ROWS-1;r>=0;r--){if(board[r].every(v=>v)){board.splice(r,1);board.unshift(Array(COLS).fill(0));cleared++;r++}}
+  if(cleared){score+=[0,100,300,500,800][cleared]*level;lines+=cleared;level=Math.floor(lines/10)+1;document.getElementById('score').textContent=score;document.getElementById('level').textContent=level;resetInterval()}
+}
+function resetInterval(){clearInterval(interval);interval=setInterval(tick,Math.max(80,600-level*50))}
+function tick(){
+  if(paused||gameOver)return;
+  if(!collides(piece.shape,piece.x,piece.y+1))piece.y++;
+  else{merge();clearLines();piece=nextP;nextP=randPiece();drawNext();if(collides(piece.shape,piece.x,piece.y)){gameOver=true;clearInterval(interval);document.getElementById('final-score').textContent='Score: '+score;document.getElementById('overlay').classList.add('show')}}
+  draw();
+}
+function startGame(){
+  board=newBoard();score=0;lines=0;level=1;paused=false;gameOver=false;
+  document.getElementById('score').textContent='0';document.getElementById('level').textContent='1';
+  document.getElementById('overlay').classList.remove('show');document.getElementById('pauseBtn').textContent='Pause';
+  piece=randPiece();nextP=randPiece();drawNext();clearInterval(interval);resetInterval();draw();
+}
+function togglePause(){paused=!paused;document.getElementById('pauseBtn').textContent=paused?'Resume':'Pause'}
+function doLeft(){if(gameOver||paused||!piece)return;if(!collides(piece.shape,piece.x-1,piece.y))piece.x--;draw()}
+function doRight(){if(gameOver||paused||!piece)return;if(!collides(piece.shape,piece.x+1,piece.y))piece.x++;draw()}
+function doDown(){if(gameOver||paused||!piece)return;if(!collides(piece.shape,piece.x,piece.y+1))piece.y++;draw()}
+function doRotate(){if(gameOver||paused||!piece)return;const r=rotate(piece.shape);if(!collides(r,piece.x,piece.y))piece.shape=r;draw()}
+function doDrop(){if(gameOver||paused||!piece)return;while(!collides(piece.shape,piece.x,piece.y+1))piece.y++;tick()}
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft')doLeft();
+  else if(e.key==='ArrowRight')doRight();
+  else if(e.key==='ArrowDown')doDown();
+  else if(e.key==='ArrowUp')doRotate();
+  else if(e.key===' '){e.preventDefault();doDrop()}
+  else if(e.key==='p'||e.key==='P')togglePause();
+});
+startGame();
+</script>
+</body>
+</html>
